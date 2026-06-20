@@ -151,13 +151,11 @@ metadata:
     alb.ingress.kubernetes.io/healthcheck-interval-seconds: "30"
     alb.ingress.kubernetes.io/healthy-threshold-count: "2"
     alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
-    # ⚠️ Reemplaza con los IDs de tus subredes públicas
     alb.ingress.kubernetes.io/subnets: subnet-XXXXXXXX,subnet-YYYYYYYY
 spec:
   rules:
     - http:
         paths:
-          # ── Tráfico al API Gateway (backend) ──
           - path: /api
             pathType: Prefix
             backend:
