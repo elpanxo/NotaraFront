@@ -1,0 +1,148 @@
+# ============================================================
+# notara-frontend / .github/workflows/deploy.yml
+# Pipeline CI/CD — Build Next.js → ECR → EKS
+#
+# SECRETS requeridos en este repo:
+#   AWS_ACCESS_KEY_ID       → Credencial AWS Academy
+#   AWS_SECRET_ACCESS_KEY   → Credencial AWS Academy
+#   AWS_SESSION_TOKEN       → Token de sesión Academy (rota cada 4h)
+#   AWS_REGION              → us-east-1
+#   AWS_ACCOUNT_ID          → ID de tu cuenta AWS (12 dígitos)
+#   EKS_CLUSTER_NAME        → notara-cluster
+# ============================================================
+name: 🎨 Deploy Frontend to EKS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  AWS_REGION:   ${{ secrets.AWS_REGION }}
+  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+  ECR_REPO:     notara/frontend
+  IMAGE_TAG:    ${{ github.sha }}
+
+jobs:
+  # ──────────────────────────────────────────────────────────
+  # JOB 1: Build y Push de la imagen Docker del frontend
+  # ──────────────────────────────────────────────────────────
+  build:
+    name: 🐳 Build & Push Frontend
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout ───────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Credenciales AWS ───────────────────────────────
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      # ── 3. Login ECR ──────────────────────────────────────
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # ── 4. Build y Push ───────────────────────────────────
+      - name: Build Docker image
+        run: |
+          IMAGE_URI=${{ env.ECR_REGISTRY }}/${{ env.ECR_REPO }}
+
+          echo "🔨 Construyendo imagen del frontend..."
+          docker build \
+            -t ${IMAGE_URI}:${{ env.IMAGE_TAG }} \
+            -t ${IMAGE_URI}:latest \
+            ./frontend          # La carpeta frontend está en la raíz del repo
+
+          echo "📤 Haciendo push a ECR..."
+          docker push ${IMAGE_URI}:${{ env.IMAGE_TAG }}
+          docker push ${IMAGE_URI}:latest
+
+          echo "✅ Frontend publicado: ${IMAGE_URI}:${{ env.IMAGE_TAG }}"
+
+  # ──────────────────────────────────────────────────────────
+  # JOB 2: Deploy a EKS
+  # ──────────────────────────────────────────────────────────
+  deploy:
+    name: 🚀 Deploy to EKS — notara-frontend
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      # ── 1. Checkout ───────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Credenciales AWS ───────────────────────────────
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      # ── 3. Instalar kubectl ───────────────────────────────
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: v1.29.0
+
+      # ── 4. Conectar al cluster ────────────────────────────
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ env.AWS_REGION }} \
+            --name   ${{ secrets.EKS_CLUSTER_NAME }}
+
+      # ── 5. Inyectar imagen real y tag en el manifiesto ────
+      - name: Inject ECR image URI into manifest
+        run: |
+          ECR=${{ env.ECR_REGISTRY }}
+          TAG=${{ env.IMAGE_TAG }}
+
+          # Reemplaza el placeholder con el registry real
+          sed -i "s|ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com|${ECR}|g" \
+            k8s/manifests.yaml
+
+          # Reemplaza :latest con el SHA del commit
+          sed -i "s|:latest|:${TAG}|g" k8s/manifests.yaml
+
+      # ── 6. Aplicar manifiestos ────────────────────────────
+      - name: Apply K8s manifests
+        run: |
+          echo "📦 Aplicando manifiestos de notara-frontend..."
+          kubectl apply -f k8s/manifests.yaml
+
+      # ── 7. Esperar que el deployment esté listo ───────────
+      - name: Wait for frontend deployment
+        run: |
+          echo "⏳ Esperando que el frontend esté listo..."
+          kubectl rollout status deployment/frontend \
+            -n notara-frontend --timeout=120s
+
+      # ── 8. Obtener la URL del ALB ─────────────────────────
+      - name: Get ALB URL
+        run: |
+          echo "⏳ Esperando que el ALB esté disponible (puede tomar ~60s)..."
+          sleep 30
+
+          ALB_URL=$(kubectl get ingress notara-ingress \
+            -n notara-frontend \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "Pendiente")
+
+          echo ""
+          echo "✅ Deploy completado — commit: ${{ env.IMAGE_TAG }}"
+          echo "🌐 URL de la aplicación: http://${ALB_URL}"
+          echo ""
+          echo "📊 Pods en notara-frontend:"
+          kubectl get pods -n notara-frontend
+          echo ""
+          echo "🔀 Ingress:"
+          kubectl get ingress -n notara-frontend

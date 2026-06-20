@@ -1,0 +1,24 @@
+# ============================================================
+# notara-frontend / docker-compose.yml
+# Para desarrollo local
+# PRE-REQUISITO: notara-data debe estar corriendo primero
+#   (docker compose up -d desde el repo notara-data)
+#
+# Uso: docker compose up -d
+# ============================================================
+networks:
+  notara-network:
+    external: true   # Red creada por notara-data
+
+services:
+  frontend:
+    build: ./frontend
+    container_name: notara-frontend
+    ports:
+      - "3001:3001"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:3000
+      - NODE_ENV=development
+    networks:
+      - notara-network
+    restart: unless-stopped

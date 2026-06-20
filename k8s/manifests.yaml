@@ -1,0 +1,196 @@
+# ============================================================
+# notara-frontend / k8s / manifests.yaml
+# Next.js frontend + Ingress ALB
+# Namespace: notara-frontend
+#
+# PRE-REQUISITO: El AWS Load Balancer Controller debe estar
+# instalado en el cluster antes de crear el Ingress.
+# ============================================================
+
+# ── Namespace ──────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: notara-frontend
+  labels:
+    project: notara
+    layer: frontend
+
+---
+# ── ConfigMap: variables del frontend ─────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-config
+  namespace: notara-frontend
+data:
+  NODE_ENV: "production"
+  # URL pública del API Gateway (se actualiza con la URL del ALB)
+  # En producción apunta al mismo ALB bajo /api
+  NEXT_PUBLIC_API_URL: "http://api-gateway-svc.notara-backend.svc.cluster.local:3000"
+
+---
+# ══════════════════════════════════════════════════════════
+# DEPLOYMENT — Next.js Frontend
+# Puerto: 3001 | Imagen: notara/frontend
+# ══════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: notara-frontend
+  labels:
+    app: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/notara/frontend:latest
+          ports:
+            - containerPort: 3001
+          envFrom:
+            - configMapRef:
+                name: frontend-config
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "150m"
+            limits:
+              memory: "512Mi"
+              cpu: "400m"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3001
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3001
+            initialDelaySeconds: 40
+            periodSeconds: 20
+            failureThreshold: 3
+---
+# ── Service ────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-svc
+  namespace: notara-frontend
+spec:
+  selector:
+    app: frontend
+  ports:
+    - port: 3001
+      targetPort: 3001
+  type: ClusterIP
+
+---
+# ── HPA — Autoscaling del frontend ────────────────────────
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: frontend-hpa
+  namespace: notara-frontend
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: frontend
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+---
+# ══════════════════════════════════════════════════════════
+# INGRESS — AWS Application Load Balancer
+#
+# Rutas:
+#   /          → frontend (Next.js, puerto 3001)
+#   /api/*     → api-gateway en notara-backend (puerto 3000)
+#   /auth/*    → api-gateway
+#   /songs/*   → api-gateway
+#   /ia/*      → api-gateway
+#
+# IMPORTANTE: Reemplaza subnet-XXXXXXXX y subnet-YYYYYYYY
+# con los IDs de tus subredes PÚBLICAS en AWS Academy.
+# ══════════════════════════════════════════════════════════
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: notara-ingress
+  namespace: notara-frontend
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+    alb.ingress.kubernetes.io/healthcheck-path: /
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "30"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+    # ⚠️ Reemplaza con los IDs de tus subredes públicas
+    alb.ingress.kubernetes.io/subnets: subnet-XXXXXXXX,subnet-YYYYYYYY
+spec:
+  rules:
+    - http:
+        paths:
+          # ── Tráfico al API Gateway (backend) ──
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: api-gateway-svc
+                port:
+                  number: 3000
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: api-gateway-svc
+                port:
+                  number: 3000
+          - path: /songs
+            pathType: Prefix
+            backend:
+              service:
+                name: api-gateway-svc
+                port:
+                  number: 3000
+          - path: /ia
+            pathType: Prefix
+            backend:
+              service:
+                name: api-gateway-svc
+                port:
+                  number: 3000
+          # ── Todo lo demás → Next.js ──
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-svc
+                port:
+                  number: 3001
