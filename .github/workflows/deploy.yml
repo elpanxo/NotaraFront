@@ -18,10 +18,10 @@ on:
   workflow_dispatch:
 
 env:
-  AWS_REGION:   ${{ secrets.AWS_REGION }}
+  AWS_REGION: ${{ secrets.AWS_REGION }}
   ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
-  ECR_REPO:     notara/frontend
-  IMAGE_TAG:    ${{ github.sha }}
+  ECR_REPO: notara/frontend
+  IMAGE_TAG: ${{ github.sha }}
 
 jobs:
   # ──────────────────────────────────────────────────────────
@@ -40,10 +40,10 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
-          aws-region:            ${{ env.AWS_REGION }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
 
       # ── 3. Login ECR ──────────────────────────────────────
       - name: Login to Amazon ECR
@@ -58,7 +58,7 @@ jobs:
           docker build \
             -t ${IMAGE_URI}:${{ env.IMAGE_TAG }} \
             -t ${IMAGE_URI}:latest \
-            ./frontend          # La carpeta frontend está en la raíz del repo
+            .
 
           echo "📤 Haciendo push a ECR..."
           docker push ${IMAGE_URI}:${{ env.IMAGE_TAG }}
@@ -83,10 +83,10 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
-          aws-region:            ${{ env.AWS_REGION }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
 
       # ── 3. Instalar kubectl ───────────────────────────────
       - name: Install kubectl
