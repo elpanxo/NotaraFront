@@ -27,7 +27,7 @@ data:
   NODE_ENV: "production"
   # URL pública del API Gateway (se actualiza con la URL del ALB)
   # En producción apunta al mismo ALB bajo /api
-  NEXT_PUBLIC_API_URL: "http://api-gateway-svc.notara-backend.svc.cluster.local:3000"
+  NEXT_PUBLIC_API_URL: "http://a250fb406c18b4c11a5d1700358b493b-1410234414.us-east-1.elb.amazonaws.com:3000"
 
 ---
 # ══════════════════════════════════════════════════════════
@@ -91,9 +91,10 @@ spec:
   selector:
     app: frontend
   ports:
-    - port: 3001
+    - name: http
+      port: 3001
       targetPort: 3001
-  type: ClusterIP
+  type: LoadBalancer
 
 ---
 # ── HPA — Autoscaling del frontend ────────────────────────
@@ -151,11 +152,13 @@ metadata:
     alb.ingress.kubernetes.io/healthcheck-interval-seconds: "30"
     alb.ingress.kubernetes.io/healthy-threshold-count: "2"
     alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+    # ⚠️ Reemplaza con los IDs de tus subredes públicas
     alb.ingress.kubernetes.io/subnets: subnet-XXXXXXXX,subnet-YYYYYYYY
 spec:
   rules:
     - http:
         paths:
+          # ── Tráfico al API Gateway (backend) ──
           - path: /api
             pathType: Prefix
             backend:

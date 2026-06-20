@@ -14,7 +14,7 @@ name: 🎨 Deploy Frontend to EKS
 
 on:
   push:
-    branches: [deploy]
+    branches: [main]
   workflow_dispatch:
 
 env:
@@ -52,6 +52,7 @@ jobs:
 
           echo "🔨 Construyendo imagen del frontend..."
           docker build \
+            --build-arg NEXT_PUBLIC_API_URL="${{ secrets.NEXT_PUBLIC_API_URL }}" \
             -t ${IMAGE_URI}:${{ env.IMAGE_TAG }} \
             -t ${IMAGE_URI}:latest \
             .
