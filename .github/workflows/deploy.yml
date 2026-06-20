@@ -1,6 +1,6 @@
 # ============================================================
 # notara-frontend / .github/workflows/deploy.yml
-# Pipeline CI/CD — Build Next.js → ECR → EKS
+# Pipeline CI/CD — Build Next.js → ECR (notara-front) → EKS
 #
 # SECRETS requeridos en este repo:
 #   AWS_ACCESS_KEY_ID       → Credencial AWS Academy
@@ -14,13 +14,13 @@ name: 🎨 Deploy Frontend to EKS
 
 on:
   push:
-    branches: [deploy]
+    branches: [main]
   workflow_dispatch:
 
 env:
   AWS_REGION: ${{ secrets.AWS_REGION }}
   ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
-  ECR_REPO: notara/frontend
+  ECR_REPO: notara-front # ← nombre real de tu repo ECR
   IMAGE_TAG: ${{ github.sha }}
 
 jobs:
@@ -32,11 +32,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ── 1. Checkout ───────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ── 2. Credenciales AWS ───────────────────────────────
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -45,11 +43,9 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # ── 3. Login ECR ──────────────────────────────────────
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      # ── 4. Build y Push ───────────────────────────────────
       - name: Build Docker image
         run: |
           IMAGE_URI=${{ env.ECR_REGISTRY }}/${{ env.ECR_REPO }}
@@ -75,11 +71,9 @@ jobs:
     needs: build
 
     steps:
-      # ── 1. Checkout ───────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ── 2. Credenciales AWS ───────────────────────────────
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -88,46 +82,44 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # ── 3. Instalar kubectl ───────────────────────────────
       - name: Install kubectl
         uses: azure/setup-kubectl@v3
         with:
           version: v1.29.0
 
-      # ── 4. Conectar al cluster ────────────────────────────
       - name: Update kubeconfig
         run: |
           aws eks update-kubeconfig \
             --region ${{ env.AWS_REGION }} \
             --name   ${{ secrets.EKS_CLUSTER_NAME }}
 
-      # ── 5. Inyectar imagen real y tag en el manifiesto ────
+      # ── Reemplaza el placeholder por el repo/tag REAL ──
       - name: Inject ECR image URI into manifest
         run: |
           ECR=${{ env.ECR_REGISTRY }}
+          REPO=${{ env.ECR_REPO }}
           TAG=${{ env.IMAGE_TAG }}
 
-          # Reemplaza el placeholder con el registry real
-          sed -i "s|ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com|${ECR}|g" \
+          # El manifest original tiene:
+          #   image: ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/notara/frontend:latest
+          # Lo reemplazamos completo por la imagen real:
+          sed -i "s|ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/notara/frontend:latest|${ECR}/${REPO}:${TAG}|g" \
             k8s/manifests.yaml
 
-          # Reemplaza :latest con el SHA del commit
-          sed -i "s|:latest|:${TAG}|g" k8s/manifests.yaml
+          echo "📋 Imagen inyectada:"
+          grep "image:" k8s/manifests.yaml
 
-      # ── 6. Aplicar manifiestos ────────────────────────────
       - name: Apply K8s manifests
         run: |
           echo "📦 Aplicando manifiestos de notara-frontend..."
           kubectl apply -f k8s/manifests.yaml
 
-      # ── 7. Esperar que el deployment esté listo ───────────
       - name: Wait for frontend deployment
         run: |
           echo "⏳ Esperando que el frontend esté listo..."
           kubectl rollout status deployment/frontend \
             -n notara-frontend --timeout=120s
 
-      # ── 8. Obtener la URL del ALB ─────────────────────────
       - name: Get ALB URL
         run: |
           echo "⏳ Esperando que el ALB esté disponible (puede tomar ~60s)..."
