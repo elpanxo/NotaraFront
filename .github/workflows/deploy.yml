@@ -14,7 +14,7 @@ name: 🎨 Deploy Frontend to EKS
 
 on:
   push:
-    branches: [main]
+    branches: [deploy]
   workflow_dispatch:
 
 env:
